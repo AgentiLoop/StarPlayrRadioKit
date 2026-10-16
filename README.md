@@ -1,5 +1,8 @@
 # StarPlayrRadioKit
 
+🤖 **Built by the makers of [Agent!](https://github.com/AgentiLoop/Agent)**, an autonomous macOS agent.
+
+
 middleware, SiriusXM abstraction layer, HLS streamer for StarPlayrX mustang.
 
 Supports macOS and iOS (framework should also support tvOS and watchOS, untested)
