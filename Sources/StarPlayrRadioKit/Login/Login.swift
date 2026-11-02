@@ -18,7 +18,7 @@ public func LoginX(username: String, pass: String) -> (request: Dictionary<Strin
 	
 }
 
-func processLogin(username: String, pass: String, result: PostReturnTuple) -> (success: Bool, message: String, data: String) {
+public func processLogin(username: String, pass: String, result: PostReturnTuple) -> (success: Bool, message: String, data: String) {
     
     var email = ""
     var success = false

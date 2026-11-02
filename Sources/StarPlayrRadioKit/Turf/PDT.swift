@@ -7,7 +7,7 @@
 import Foundation
 import CommonCrypto
 
-internal func PDTendpoint() -> String {
+public func PDTendpoint() -> String {
     
     let timeInterval = Date().timeIntervalSince1970
     let convert = timeInterval * 1000 as NSNumber
@@ -20,7 +20,7 @@ internal func PDTendpoint() -> String {
 }
 
 //MARK: Process Artist and Song Data
-internal func processPDT(data: DiscoverChannelList) -> [String:Any] {
+public func processPDT(data: DiscoverChannelList) -> [String:Any] {
     var ArtistSongData = [String : Any ]()
     
     //let status = data.moduleListResponse.status //100

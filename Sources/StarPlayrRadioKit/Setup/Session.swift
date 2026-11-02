@@ -8,7 +8,7 @@
 import Foundation
 
 @discardableResult
-internal func Session(channelid: String, updateToken: Bool, updateUser: Bool) -> String {
+public func Session(channelid: String, updateToken: Bool, updateUser: Bool) -> String {
     var channelLineUpId = "350" //default to large channel and image set
 
     let timeInterval = NSDate().timeIntervalSince1970

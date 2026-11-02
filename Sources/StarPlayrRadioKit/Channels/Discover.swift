@@ -7,7 +7,7 @@
 import Foundation
 
 // MARK: - DiscoverChannelList
-struct DiscoverChannelList: Codable {
+public struct DiscoverChannelList: Codable {
     var moduleListResponse: ModuleListResponse?
     
     enum CodingKeys: String, CodingKey {

@@ -8,7 +8,7 @@
 
 import Foundation
 
-internal func PostSync(request: Dictionary<String, Any>, endpoint: String, method: String, PostTupleHandler: @escaping PostTupleHandler) {
+public func PostSync(request: Dictionary<String, Any>, endpoint: String, method: String, PostTupleHandler: @escaping PostTupleHandler) {
     
     let dummy = (message: method + " failed in guard statement", success: false, data: ["": ""], response: nil ) as PostReturnTuple
     guard let url = URL(string: endpoint) else { PostTupleHandler(dummy); return }

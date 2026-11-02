@@ -8,7 +8,7 @@
 import Foundation
 
 //MARK: After
-internal func nowPlayingLiveAsync(endpoint: String, LiveHandler: @escaping LiveHandler) {
+public func nowPlayingLiveAsync(endpoint: String, LiveHandler: @escaping LiveHandler) {
     guard let url = URL(string: endpoint) else { LiveHandler(.none); return }
     let decoder = JSONDecoder()
     var urlReq = URLRequest(url: url)
@@ -42,7 +42,7 @@ public func nowPlayingLive(channelid: String) -> String {
     return endpoint
 }
 
-internal func processNPL(data: NowPlayingLiveStruct) {
+public func processNPL(data: NowPlayingLiveStruct) {
     autoreleasepool {
         guard
             let markers = data.moduleListResponse.moduleList.modules.first?.moduleResponse.liveChannelData.markerLists
@@ -76,7 +76,7 @@ internal func processNPL(data: NowPlayingLiveStruct) {
 }
 
 // MARK: - NowPlayingLiveStruct
-struct NowPlayingLiveStruct: Codable {
+public struct NowPlayingLiveStruct: Codable {
     let moduleListResponse: ModuleListResponse
     
     enum CodingKeys: String, CodingKey {

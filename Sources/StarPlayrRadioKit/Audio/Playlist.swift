@@ -8,7 +8,7 @@
 import Foundation
 
 //Cached verison of Playlist
-func Playlist(channelid: String) -> String {
+public func Playlist(channelid: String) -> String {
     let bitrate = Network.ability.networkIsCellular ? "64k" : "256k"
 
     let size = "medium"

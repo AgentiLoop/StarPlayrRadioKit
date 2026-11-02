@@ -53,7 +53,7 @@ public func preflightConfig(location: String = "US") {
     restoreCookiesX()
 }
 
-func storeCookiesX() {
+public func storeCookiesX() {
     
     let cookiesStorage = HTTPCookieStorage.shared
     let userDefaults = UserDefaults.standard

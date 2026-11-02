@@ -14,13 +14,9 @@ let package = Package(
             name: "StarPlayrRadioKit",
             targets: ["StarPlayrRadioKit"]),
     ],
-    dependencies: [
-        .package(url: "https://github.com/AgentiLoop/SwifterLite", branch: "mustang")
-    ],
     targets: [
         .target(
-            name: "StarPlayrRadioKit",
-            dependencies: [.product(name: "SwifterLite", package: "SwifterLite")]
+            name: "StarPlayrRadioKit"
         ),
     ]
 )

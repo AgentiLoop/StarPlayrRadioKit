@@ -1,7 +1,7 @@
 //PlayList
 import Foundation
 
-func AudioX(data: String, channelId: String) -> String {
+public func AudioX(data: String, channelId: String) -> String {
     let bitrate = Network.ability.networkIsCellular ? "64k" : "256k"
     guard
         let hls_prime = hls_sources["Live_Primary_HLS"],

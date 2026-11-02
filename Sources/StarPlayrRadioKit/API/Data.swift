@@ -7,7 +7,7 @@
 import Foundation
 
 //MARK: Data Sync
-internal func dataSync(endpoint: String, method: String, DataHandler: @escaping DataHandler ) {
+public func dataSync(endpoint: String, method: String, DataHandler: @escaping DataHandler ) {
  
     guard let url = URL(string: endpoint) else { DataHandler(.none); return}
     

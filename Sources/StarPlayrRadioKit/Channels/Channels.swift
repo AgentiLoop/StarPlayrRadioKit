@@ -2,7 +2,7 @@ import Foundation
 
 typealias ChannelsTuple = (success: Bool, message: String, data: Dictionary<String, Any>, categories: Array<String> )
 
-internal func Channels() -> (request: [String : [String : [[String : Any]]]], endpoint: String, method: String) {
+public func Channels() -> (request: [String : [String : [[String : Any]]]], endpoint: String, method: String) {
     let endpoint = "https://\(playerDomain)/rest/v4/experience/modules/get?type=2"
     let method = "channels"
     let request =  ["moduleList":["modules":[["moduleArea":"Discovery","moduleType":"ChannelListing","moduleRequest":["resultTemplate":""]]]]] as Dictionary
@@ -10,7 +10,7 @@ internal func Channels() -> (request: [String : [String : [[String : Any]]]], en
     return (request: request, endpoint: endpoint, method: method)
 }
 
-internal func processChannels(result: PostReturnTuple) -> (success: Bool, message: String, data: Dictionary<String,Any>, categories: Array<String>) {
+public func processChannels(result: PostReturnTuple) -> (success: Bool, message: String, data: Dictionary<String,Any>, categories: Array<String>) {
     
     var recordCategories = Array<String>()
     var success : Bool = false

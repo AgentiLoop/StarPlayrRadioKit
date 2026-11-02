@@ -25,7 +25,7 @@ internal func GetAsync(endpoint: String, DictionaryHandler: @escaping Dictionary
 }
 
 //MARK: - GetPdtAsyc
-internal func GetPdtSync(endpoint: String, method: String, PdtHandler: @escaping PdtHandler) {
+public func GetPdtSync(endpoint: String, method: String, PdtHandler: @escaping PdtHandler) {
 
     guard let url = URL(string: endpoint) else { PdtHandler(nil); return }
     
