@@ -83,6 +83,449 @@ let key = Data(base64Encoded: userX.key)
 
 The stream token expires after about 8 minutes. StarPlayrX calls `Session(channelid:updateToken:true, updateUser:false)` again every 480 seconds.
 
+## Examples
+
+Every helper that waits (`PostSync`, `TextSync`, `dataSync`, `GetPdtSync`, `Session`) runs its completion handler **before it returns**. The usual pattern is to capture the result in a local variable and read it after the call. Run all of these examples on a background queue.
+
+### 1. Run kit calls off the main thread
+
+```swift
+import StarPlayrRadioKit
+
+let radioQueue = DispatchQueue(label: "radio", qos: .userInitiated)
+
+/// Turns any of the blocking kit calls into an async function.
+func onRadioQueue<T>(_ work: @escaping () -> T) async -> T {
+    await withCheckedContinuation { continuation in
+        radioQueue.async { continuation.resume(returning: work()) }
+    }
+}
+```
+
+### 2. Region setup and automatic sign-in
+
+`preflightConfig` restores `userX` from `UserDefaults` only when there's a saved gupid **and** a saved channel lineup.
+
+```swift
+func bootstrap(region: String) -> Bool {
+    preflightConfig(location: region)          // "US" or "CA"
+    let restored = !userX.gupid.isEmpty && userX.channels.count > 1
+    print(restored ? "Welcome back, \(userX.email)" : "Sign-in needed")
+    return restored
+}
+```
+
+`Config()` downloads the CDN hosts without waiting. `hls_sources` may be empty for a moment after `preflightConfig` returns. If an earlier launch stored them, the cached copy is used when the download fails.
+
+```swift
+func waitForHLSSources(timeout: TimeInterval = 5) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    while hls_sources["Live_Secondary_HLS"] == nil, Date() < deadline {
+        Thread.sleep(forTimeInterval: 0.1)
+    }
+    return hls_sources["Live_Secondary_HLS"] != nil
+}
+```
+
+### 3. Signing in with error handling
+
+```swift
+enum LoginResult {
+    case success(gupid: String)
+    case failure(String)
+}
+
+func signIn(user: String, pass: String) -> LoginResult {
+    let login = LoginX(username: user, pass: pass)
+    var outcome = LoginResult.failure("No response from SiriusXM.")
+
+    PostSync(request: login.request, endpoint: login.endpoint, method: login.method) { result in
+        guard let result else { return }
+
+        // HTTP 403 → "Too many incorrect logins …" (IP blocked for 24 hours)
+        let login = processLogin(username: user, pass: pass, result: result)
+
+        if login.success {
+            storeCookiesX()                    // keep the session cookies for the next launch
+            outcome = .success(gupid: login.data)
+        } else {
+            outcome = .failure(login.message)
+        }
+    }
+    return outcome
+}
+
+// From SwiftUI or UIKit:
+Task {
+    switch await onRadioQueue({ signIn(user: email, pass: password) }) {
+    case .success(let gupid): print("Signed in, gupid \(gupid)")
+    case .failure(let message): print("Login failed: \(message)")
+    }
+}
+```
+
+### 4. Loading the channel lineup
+
+```swift
+struct Channel {
+    let id: String          // SiriusXM channel ID
+    let number: Int         // 2
+    let name: String
+    let logo: URL?          // 720 px logo for dark backgrounds
+    let category: String
+}
+
+func loadChannels() -> (channels: [Channel], categories: [String])? {
+    let api = Channels()
+    var lineup: (channels: [Channel], categories: [String])?
+
+    PostSync(request: api.request, endpoint: api.endpoint, method: api.method) { result in
+        guard let result else { return }
+        let processed = processChannels(result: result)
+        guard processed.success else { print(processed.message); return }
+
+        storeCookiesX()
+
+        let channels = processed.data.values.compactMap { value -> Channel? in
+            guard
+                let ch = value as? [String: Any],
+                let id = ch["channelId"] as? String,
+                let numberText = ch["channelNumber"] as? String,
+                let number = Int(numberText),
+                let name = ch["name"] as? String,
+                let category = ch["category"] as? String
+            else { return nil }
+
+            return Channel(id: id, number: number, name: name,
+                           logo: URL(string: ch["mediumImage"] as? String ?? ""),
+                           category: category)
+        }
+        .sorted { $0.number < $1.number }
+
+        lineup = (channels, processed.categories)
+    }
+    return lineup
+}
+```
+
+Group the lineup by category, using the category order the kit returns:
+
+```swift
+if let lineup = loadChannels() {
+    let byCategory = Dictionary(grouping: lineup.channels, by: \.category)
+    for category in lineup.categories {
+        let names = byCategory[category, default: []].map { "\($0.number) \($0.name)" }
+        print("\(category): \(names.joined(separator: ", "))")
+    }
+}
+```
+
+### 5. Converting between channel number and channel ID
+
+`userX.channels` is keyed by channel **number**. `userX.ids` is keyed by channel **ID**.
+
+```swift
+func channelId(forNumber number: String) -> String? {
+    (userX.channels[number] as? [String: Any])?["channelId"] as? String
+}
+
+func channelNumber(forId id: String) -> String? {
+    (userX.ids[id] as? [String: Any])?["channelNumber"] as? String
+}
+
+let id = channelId(forNumber: "2")             // the channel ID for channel 2
+let number = id.flatMap(channelNumber(forId:)) // "2"
+```
+
+### 6. Tuning in and keeping the token fresh
+
+```swift
+final class Tuner {
+    private var currentId = ""
+    private var tokenRefreshed = Date.distantPast
+    private let tokenLifetime: TimeInterval = 480   // SXMAKTOKEN lasts about 8 minutes
+
+    /// Call this before each playlist request.
+    func prepare(channelId: String) {
+        userX.channel = channelId
+
+        if channelId != currentId {
+            // New channel: get a new token *and* this channel's key, key URL and consumer.
+            Session(channelid: channelId, updateToken: true, updateUser: true)
+            currentId = channelId
+            tokenRefreshed = Date()
+        } else if Date().timeIntervalSince(tokenRefreshed) >= tokenLifetime {
+            // Same channel, old token: refresh only the token.
+            Session(channelid: channelId, updateToken: true, updateUser: false)
+            tokenRefreshed = Date()
+        }
+    }
+}
+```
+
+`Session` returns the channel lineup ID from the server, or `"350"` if the response doesn't have one:
+
+```swift
+let lineupId = Session(channelid: channelId, updateToken: true, updateUser: true)
+print("lineup \(lineupId), key loaded: \(!userX.key.isEmpty)")
+```
+
+### 7. Fetching a playlist and rewriting it for a local server
+
+The kit returns SiriusXM's playlist without changes. To play it through your own server, point the key and segment URLs at your routes. This is what StarPlayrX does:
+
+```swift
+func localPlaylist(channelId: String) -> String? {
+    var playlist: String?
+
+    TextSync(endpoint: Playlist(channelid: channelId)) { text in
+        guard let text, !text.hasPrefix("error") else { return }   // TextSync reports failures as "error1"/"error2"
+
+        playlist = text
+            .replacingOccurrences(of: "key/1", with: "/api/v3/key")                  // #EXT-X-KEY URI
+            .replacingOccurrences(of: channelId, with: "/api/v3/aac/" + channelId)   // segment URIs
+    }
+    return playlist
+}
+```
+
+To list the segment names in a playlist:
+
+```swift
+func segmentNames(in playlist: String) -> [String] {
+    playlist
+        .split(whereSeparator: \.isNewline)
+        .map(String.init)
+        .filter { !$0.hasPrefix("#") && $0.hasSuffix(".aac") }
+}
+```
+
+### 8. Downloading AAC segments, with a retry and CDN failover
+
+```swift
+func downloadSegment(_ name: String, channelId: String) -> Data? {
+    func attempt() -> Data? {
+        var segment: Data?
+        dataSync(endpoint: AudioX(data: name, channelId: channelId), method: audioFormat) { segment = $0 }
+        return segment
+    }
+
+    if let data = attempt() ?? attempt() { return data }   // one quick retry
+
+    // Still failing: switch CDN (secondary ↔ primary) and try once more.
+    usePrime.toggle()
+    return attempt()
+}
+```
+
+Each segment is AES-128 encrypted. `AVPlayer` decrypts it with the key from the playlist's `#EXT-X-KEY`, which comes from `userX.key`:
+
+```swift
+let aesKey: Data? = Data(base64Encoded: userX.key)   // 16 bytes
+```
+
+### 9. Serving the stream with SwifterLite
+
+This is a minimal version of the StarPlayrX routes. It connects `AVPlayer` → localhost → this kit.
+
+```swift
+import SwifterLite
+import StarPlayrRadioKit
+
+let tuner = Tuner()
+
+func makeServer() -> HttpServer {
+    let server = HttpServer()
+
+    // http://127.0.0.1:9999/api/v3/m3u/2.m3u8  (channel number 2)
+    server.get["/api/v3/m3u/:channel"] = { request in
+        guard
+            let number = request.params[":channel"]?.split(separator: ".").first.map(String.init),
+            let id = channelId(forNumber: number)
+        else { return HttpResponse.notFound(.none) }
+
+        tuner.prepare(channelId: id)
+        guard let m3u8 = localPlaylist(channelId: id) else { return HttpResponse.notFound(.none) }
+        return HttpResponse.ok(.data(Data(m3u8.utf8), contentType: "application/x-mpegURL"))
+    }
+
+    server.get["/api/v3/key"] = { _ in
+        guard let key = Data(base64Encoded: userX.key) else { return HttpResponse.notFound(.none) }
+        return HttpResponse.ok(.data(key, contentType: "application/octet-stream"))
+    }
+
+    server.get["/api/v3/aac/:aac"] = { request in
+        guard
+            let name = request.params[":aac"],
+            let audio = downloadSegment(name, channelId: userX.channel)
+        else { return HttpResponse.notFound(.none) }
+        return HttpResponse.ok(.data(audio, contentType: audioFormat))
+    }
+
+    return server
+}
+
+let server = makeServer()
+try server.start(9999)
+
+let player = AVPlayer(url: URL(string: "http://127.0.0.1:9999/api/v3/m3u/2.m3u8")!)
+player.play()
+```
+
+### 10. Now playing for one channel (with album art)
+
+`nowPlayingLiveAsync` doesn't block. `processNPL` stores the album art in an internal cache, and `processPDT` reads from that cache later.
+
+```swift
+func refreshAlbumArt(channelId: String, done: @escaping () -> Void = {}) {
+    nowPlayingLiveAsync(endpoint: nowPlayingLive(channelid: channelId)) { live in
+        if let live { processNPL(data: live) }   // talk channels often return nil
+        done()
+    }
+}
+```
+
+### 11. Now playing for every channel
+
+```swift
+struct NowPlaying {
+    let artist: String
+    let song: String
+    let image: URL?
+}
+
+func nowPlayingAll() -> [String: NowPlaying] {      // keyed by channel number
+    var guide = [String: NowPlaying]()
+
+    GetPdtSync(endpoint: PDTendpoint(), method: "PDT") { pdt in
+        guard let pdt else { return }
+        for (number, value) in processPDT(data: pdt) {
+            guard let info = value as? [String: Any] else { continue }
+            guide[number] = NowPlaying(
+                artist: info["artist"] as? String ?? "",
+                song:   info["song"]   as? String ?? "",
+                image:  URL(string: info["image"] as? String ?? "")
+            )
+        }
+    }
+    return guide
+}
+```
+
+To poll the guide, and refresh the album art for the channel that's playing first:
+
+```swift
+let guideTimer = DispatchSource.makeTimerSource(queue: radioQueue)
+guideTimer.schedule(deadline: .now(), repeating: 10)
+guideTimer.setEventHandler {
+    let finished = DispatchSemaphore(value: 0)
+    refreshAlbumArt(channelId: userX.channel) { finished.signal() }
+    _ = finished.wait(timeout: .now() + 5)
+
+    let guide = nowPlayingAll()
+    if let number = channelNumber(forId: userX.channel), let now = guide[number] {
+        DispatchQueue.main.async { print("♪ \(now.artist) – \(now.song)") }
+    }
+}
+guideTimer.resume()
+```
+
+### 12. Fading the volume and switching channels smoothly
+
+`fadeVolume` sets `volume = from` straight away and then changes it every 0.1 s on a `Timer`. Call it on the **main thread**, which has a run loop.
+
+```swift
+import AVFoundation
+
+// Fade in over 2 seconds.
+player.play()
+player.fadeVolume(from: 0, to: 1, duration: 2)
+
+// Fade out, then pause.
+player.fadeVolume(from: player.volume, to: 0, duration: 1.5) {
+    player.pause()
+}
+
+// Fade out, switch to another channel, then fade back in.
+func switchChannel(to number: String) {
+    player.fadeVolume(from: player.volume, to: 0, duration: 0.5) {
+        let url = URL(string: "http://127.0.0.1:9999/api/v3/m3u/\(number).m3u8")!
+        player.replaceCurrentItem(with: AVPlayerItem(url: url))
+        player.play()
+        player.fadeVolume(from: 0, to: 1, duration: 1)
+    }
+}
+
+// Keep the Timer if you might need to cancel the fade.
+var fade: Timer? = player.fadeVolume(from: 1, to: 0.2, duration: 3)   // "duck"
+fade?.invalidate()
+```
+
+### 13. Mac app hooks: real durations, playlist and segment observers
+
+```swift
+// Keep the real #EXTINF durations so AVPlayerItem.currentDate() matches EXT-X-PROGRAM-DATE-TIME.
+// Your playlist route checks this flag (see StarPlayrXMac's playlistRoute).
+realSegmentDurations = true
+
+// Called by your playlist route with each playlist it serves.
+livePlaylistObserver = { playlist in
+    let pdt = playlist
+        .split(whereSeparator: \.isNewline)
+        .first { $0.hasPrefix("#EXT-X-PROGRAM-DATE-TIME:") }
+    print("Playlist starts at \(pdt ?? "?")")
+}
+
+// Called by your segment route with each (still encrypted) segment and its AES key.
+// StarPlayrX for Mac decrypts and analyses these to draw its spectrum bars before playback.
+liveSegmentObserver = { name, data, key in
+    guard !data.isEmpty, let key else {
+        print("Segment \(name) failed to download")
+        return
+    }
+    print("Segment \(name): \(data.count) bytes, key \(key.count) bytes")
+}
+```
+
+In your routes, call the observers yourself:
+
+```swift
+livePlaylistObserver?(playlist)
+liveSegmentObserver?(name, audio, Data(base64Encoded: userX.key))
+```
+
+### 14. Switching region at runtime
+
+```swift
+func switchRegion(to region: String) {   // "US" or "CA"
+    preflightConfig(location: region)    // updates playerDomain, root, appRegion and reloads hls_sources
+    _ = loadChannels()                   // the lineup is different in each region
+}
+```
+
+### 15. Signing out (clearing saved state)
+
+The kit doesn't have a sign-out function. Clear the `UserDefaults` keys it uses, and reset `userX`:
+
+```swift
+func signOut() {
+    let keys = ["user", "pass", "email", "gupid", "loggedin", "token", "key",
+                "keyurl", "consumer", "channels", "ids", "channel", "siriusxm"]
+    keys.forEach(UserDefaults.standard.removeObject(forKey:))
+
+    HTTPCookieStorage.shared.cookies?.forEach(HTTPCookieStorage.shared.deleteCookie)
+
+    userX = (email: "", pass: "", channels: [:], ids: [:], channel: "", token: "",
+             loggedin: false, gupid: "", consumer: "", key: "", keyurl: "")
+}
+```
+
+### 16. Utility: `sha256`
+
+```swift
+let id = sha256("Daft Punk" + "One More Time")   // 64-character hex string, the album-art cache key
+```
+
 ## API reference
 
 ### Setup and region (`Setup/`)
