@@ -66,6 +66,17 @@ func playlistRoute() -> httpReq {{ request in
                     //MARK: add audio prefix
                     playlist = playlist.replacingOccurrences(of: channelid, with: "/api/v3/aac/" + channelid)
                     
+                    // The Mac app needs true durations so the player's date matches the stream's PDT.
+                    // It also starts 1 s behind live instead of AVPlayer's default three segments back.
+                    if realSegmentDurations {
+                        // Insert right after #EXTM3U so it works with both "\n" and "\r\n" line endings
+                        // (Swift treats "\r\n" as one Character, so firstIndex(of: "\n") misses it).
+                        if !playlist.contains("#EXT-X-START"), let header = playlist.range(of: "#EXTM3U") {
+                            playlist.insert(contentsOf: "\n#EXT-X-START:TIME-OFFSET=-1", at: header.upperBound)
+                        }
+                        return playlist
+                    }
+
                     //MARK: fix duration
                     playlist = playlist.replacingOccurrences(of: "#EXT-X-TARGETDURATION:10", with: "#EXT-X-TARGETDURATION:9")
                     
@@ -76,6 +87,7 @@ func playlistRoute() -> httpReq {{ request in
                 }
 
                 playlist = processPlaylist(list)
+                livePlaylistObserver?(playlist)
             }
         }
         
